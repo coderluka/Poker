@@ -395,15 +395,15 @@ class Table
             handsList = dealer.evaluate(players: players, cards: communityCards, debug: debug)
         }
         
-        var winner : (Int, HandRank) = (-1,.UNKNOWN)
+        var winner : (Int, HandRank) = (-1,.HighCard)
         
         for i in 0..<handsList.count
         {
             if (winner.1.rawValue < handsList[i].rawValue)
             {
-                winner = (i, handsList[i])
+                winner = ((i % players.count), handsList[i])
             }
-            // check if hand ranks are the same between players
+            // check if hand ranks are the same between possible winner and current player
             else if (winner.1.rawValue == handsList[i].rawValue)
             {
                 // check high card hand accross players
@@ -411,13 +411,36 @@ class Table
                 
                 for j in 0..<players.count
                 {
+                    let hr = dealer.compareHand(lhand: players[j].getHand(), rhand: player.0.getHand(), table: communityCards)
+                    // player with the high card has been found
                     if (players[j].getID() == player.0.getID())
                     {
-                        winner = (i % players.count,handsList[i])
+                        print("player \(i % players.count)")
+                        print("\(hr) > \(winner.1)")
+                        
+                        // consider the hand ranks before resorting to the highest card
+                        if (hr.rawValue > winner.1.rawValue)
+                        {
+                            winner = ((i % players.count)-1,hr)
+                        }
+                        else if (hr.rawValue == winner.1.rawValue)
+                        {
+                            winner = (j, dealer.compareHand(lhand: player.0.getHand(), rhand: players[j].getHand(), table: communityCards))
+                        }
+                        else
+                        {
+                            winner = ((i % players.count)-1,winner.1)
+                        }
+                        
                         break
                     }
                 }
             }
+        }
+        
+        if (winner.1 == .UNKNOWN)
+        {
+            winner.1 = .HighCard
         }
         
         print("Winning Player \(players[winner.0].getID())'s Hand", terminator:" ")
@@ -693,9 +716,9 @@ extension Dealer
             return first.getRank().rawValue > second.getRank().rawValue
         }
         
-        var highestRankingHand = t1.getPlayers()[0].getHand().getCards().sorted(by: forward)
+        var highestRankingHand = players[0].getHand().getCards().sorted(by: forward)
         var highestRank : Rank = Rank.UNKNOWN
-        var isHighCard  : Player = players[0]
+        var hasHighCard  : Player = players[0]
         
         // only cards in player's hand count!
         for i in 1..<players.count
@@ -714,6 +737,7 @@ extension Dealer
                 }
             }
             
+            // compare individual cards in a hand
             for i in 0..<cards.count
             {
                 if (highestRankingHand[i].getRank().rawValue > cards[i].getRank().rawValue)
@@ -721,23 +745,20 @@ extension Dealer
                     if (highestRank.rawValue < highestRankingHand[i].getRank().rawValue)
                     {
                         highestRank = highestRankingHand[i].getRank()
-                        isHighCard = p
+                        hasHighCard = p
                     }
                 }
-                else
+                else if (highestRank.rawValue < cards[i].getRank().rawValue)
                 {
-                    if (highestRank.rawValue < cards[i].getRank().rawValue)
-                    {
-                        highestRank = cards[i].getRank()
-                        isHighCard = p
-                    }
+                    highestRank = cards[i].getRank()
+                    hasHighCard = p
                 }
             }
             
             highestRankingHand = cards
         }
         
-        return (isHighCard, true)
+        return (hasHighCard, true)
     }
     
     private func OnePair(hand: [Card], debug: Bool=false) -> Bool
@@ -756,7 +777,7 @@ extension Dealer
     {
         var pairCount = 0
         
-        for c in 0..<3
+        for c in 0..<2
         {
             for i in c+1..<hand.count
             {
@@ -774,7 +795,7 @@ extension Dealer
             }
         }
         
-        if hand[3].getRank().rawValue == hand[4].getRank().rawValue
+        if hand[hand.count-2].getRank().rawValue == hand[hand.count-1].getRank().rawValue
         {
             pairCount += 1
         }
@@ -812,7 +833,7 @@ extension Dealer
         {
             if (debug)
             {
-                print("prev \(prev?.getRank())")
+                print("prev \(String(describing: prev?.getRank()))")
                 print("sorted \(sortedHand[c].getRank())")
                 print("\((ranks[prev?.getRank().rawValue ?? Rank.UNKNOWN.rawValue].rawValue + 1)) == \(ranks[sortedHand[c].getRank().rawValue].rawValue)")
             }
@@ -820,8 +841,15 @@ extension Dealer
             // get the value of the current element in the array and compare it to the value of the next one
             if ((ranks[prev?.getRank().rawValue ?? Rank.UNKNOWN.rawValue].rawValue + 1) == ranks[sortedHand[c].getRank().rawValue].rawValue)
             {
-                areAscRank = true
-                prev = sortedHand[c]
+                if ((ranks[prev?.getRank().rawValue ?? Rank.UNKNOWN.rawValue].rawValue - 1) != (ranks[sortedHand[c].getRank().rawValue].rawValue + 1))
+                {
+                    areAscRank = true
+                    prev = sortedHand[c]
+                }
+                else
+                {
+                    return false
+                }
             }
             else
             {
@@ -834,7 +862,34 @@ extension Dealer
     
     private func Flush(hand: [Card], debug: Bool=false) -> Bool
     {
-        return hand.dropFirst().allSatisfy({ $0.getSuit() == hand.first?.getSuit() })
+        var isSame = false
+        for c in 0...hand.count-1
+        {
+            if (hand[0].getSuit() == hand[c].getSuit())
+            {
+                isSame = true
+            }
+            else
+            {
+                return false
+            }
+        }
+        
+        return isSame
+    }
+    
+    private func Flush(hand: [Card], table: [Card], debug: Bool=false) -> Bool
+    {
+        let isSame = Flush(hand: hand)
+        var rankCount : [String: Int] = [:]
+        hand.forEach{ rankCount[$0.getSuit().rawValue, default: 0]+=1 }
+        
+        if (rankCount.values.contains(3) && isSame)
+        {
+            return true
+        }
+        
+        return false
     }
     
     private func FullHouse(hand: [Card], debug: Bool=false) -> Bool
@@ -888,65 +943,6 @@ extension Dealer
  */
     public func evaluate(players: [Player], cards: [Card], debug: Bool=false) -> [HandRank]
     {
-        func isDone(result: Bool, container: [String: Bool]) -> Bool
-        {
-            if result
-            {
-                if (debug)
-                {
-                    for (k,v) in container
-                    {
-                        if v { print("[check] \(k)") }
-                    }
-                }
-                return true
-            }
-            return false
-        }
-        
-        func checkHand(hand: [Card]) -> HandRank
-        {
-            var decision : [String: Bool] = [:]
-            
-            var result = FullHouse(hand: hand, debug: debug)
-            decision["Full House\t\t(contains three cards of one rank and two cards of another rank)"     ] = (result)
-            if isDone(result:result, container: decision) { return .FullHouse }
-            
-            result = RoyalFlush(hand: hand, debug: debug)
-            decision["Royal Flush\t\t(contains five cards of sequential rank, all of the same suit, from 10 to A)" ] = (result)
-            if isDone(result:result, container: decision) { return .RoyalFlush }
-            
-            result = StraightFlush(hand: hand, debug: debug)
-            decision["Straight Flush\t(contains five cards of sequential rank, all of the same suit, from 2 to 6)" ] = (result)
-            if isDone(result:result, container: decision) { return .StraightFlush }
-            
-            result = Flush(hand: hand, debug: debug)
-            decision["Flush\t\t\t(contains five cards all of the same suit, not all of sequential rank)"          ] = (result)
-            if isDone(result:result, container: decision) { return .Flush }
-            
-            result = ThreeKind(hand: hand, debug: debug)
-            decision["Three Of A Kind\t(contains three cards of one rank and two cards of two other ranks)"] = (result)
-            if isDone(result:result, container: decision) { return .ThreeKind }
-            
-            result = TwoPair(hand: hand, debug: debug)
-            decision["Two Pair\t\t(contains two cards of one rank, two cards of another rank and one card of a third rank)"       ] = (result)
-            if isDone(result:result, container: decision) { return .TwoPair }
-            
-            result = OnePair(hand: hand, debug: debug)
-            decision["One Pair\t\t(contains two cards of one rank and three cards of three other ranks)"       ] = (result)
-            if isDone(result:result, container: decision) { return .OnePair }
-            
-            result = FourKind(hand: hand, debug: debug)
-            decision["Four Of A Kind\t(contains four cards of one rank and one card of another rank)" ] = (result)
-            if isDone(result:result, container: decision) { return .FourKind }
-            
-            result = Straight(hand: hand, debug: debug)
-            decision["Straight\t\t(contains five cards of sequential rank, not all of the same suit)"       ] = (result)
-            if isDone(result:result, container: decision) { return .Straight }
-            
-            return .UNKNOWN
-        }
-        
         func scaleHand(best: inout HandRank, current: HandRank) -> Bool
         {
             if current.rawValue > best.rawValue
@@ -970,19 +966,19 @@ extension Dealer
             //: see possible combinations with one from player and sequentially interchange with ones on the table upto a maximum of 5 in one hand
             //: left card combinations
             bestHand.0 = [p.getHand().getCards()[0], cards[0], cards[1], cards[2], cards[3]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             
             bestHand.0 = [p.getHand().getCards()[0], cards[1], cards[2], cards[3], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             
             bestHand.0 = [p.getHand().getCards()[0], cards[0], cards[1], cards[3], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             
             bestHand.0 = [p.getHand().getCards()[0], cards[0], cards[1], cards[2], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             
             bestHand.0 = [p.getHand().getCards()[0], cards[0], cards[2], cards[3], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             
             bestRank.0 = i
             bestRank.1 = bestHand.1
@@ -995,19 +991,19 @@ extension Dealer
             
             //: right card combinations
             bestHand.0 = [p.getHand().getCards()[1], cards[0], cards[1], cards[2], cards[3]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             
             bestHand.0 = [p.getHand().getCards()[1], cards[1], cards[2], cards[3], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             
             bestHand.0 = [p.getHand().getCards()[1], cards[0], cards[1], cards[3], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             
             bestHand.0 = [p.getHand().getCards()[1], cards[0], cards[1], cards[2], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             
             bestHand.0 = [p.getHand().getCards()[1], cards[0], cards[2], cards[3], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             
             bestRank.0 = i
             bestRank.1 = bestHand.1
@@ -1021,15 +1017,15 @@ extension Dealer
             //: save only the **best** one for each player
             //: first run
             bestHand.0 = [p.getHand().getCards()[0], p.getHand().getCards()[1], cards[0], cards[1], cards[2]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             bestHand.0 = [p.getHand().getCards()[0], p.getHand().getCards()[1], cards[1], cards[2], cards[3]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             bestHand.0 = [p.getHand().getCards()[0], p.getHand().getCards()[1], cards[2], cards[3], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             bestHand.0 = [p.getHand().getCards()[0], p.getHand().getCards()[1], cards[0], cards[1], cards[3]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             bestHand.0 = [p.getHand().getCards()[0], p.getHand().getCards()[1], cards[0], cards[1], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             
             bestRank.0 = i
             bestRank.1 = bestHand.1
@@ -1041,15 +1037,15 @@ extension Dealer
             
             //: second run
             bestHand.0 = [p.getHand().getCards()[0], p.getHand().getCards()[1], cards[1], cards[2], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             bestHand.0 = [p.getHand().getCards()[0], p.getHand().getCards()[1], cards[1], cards[3], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             bestHand.0 = [p.getHand().getCards()[0], p.getHand().getCards()[1], cards[0], cards[2], cards[3]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             bestHand.0 = [p.getHand().getCards()[0], p.getHand().getCards()[1], cards[0], cards[2], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             bestHand.0 = [p.getHand().getCards()[0], p.getHand().getCards()[1], cards[0], cards[3], cards[4]]
-            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0))) { cardCombinations.append(bestHand.0) }
+            if (scaleHand(best: &bestHand.1, current: checkHand(hand: bestHand.0, table: cards, debug: debug))) { cardCombinations.append(bestHand.0) }
             
             bestRank.0 = i
             bestRank.1 = bestHand.1
@@ -1096,65 +1092,6 @@ extension Dealer
             handRank.append(highestHand)
         }
         
-        /*
-        for p in 0..<playerHand.count
-        {
-            let i = 0;
-            
-            if (playerHand[i].1.rawValue > playerHand[i+1].1.rawValue)              // 1st > 2nd
-            {
-                if (playerHand[i].1.rawValue > playerHand[i+2].1.rawValue)          // 1st > 3rd
-                {
-                    if (playerHand[i].1.rawValue > playerHand[i+3].1.rawValue)      // 1st > 4th
-                    {
-                        handRank.append(playerHand[i].1)
-                    }
-                }
-            }
-            // have the same hand rank
-            else if (players[p].getHand().getCards()[playerHand[i].0].getRank().rawValue == players[p].getHand().getCards()[playerHand[i+1].0].getRank().rawValue)
-            {
-                let player = HighCard(players: players)
-                if (player.0.getID() == players[p].getID())
-                {
-                    handRank.append(playerHand[i].1)
-                }
-            }
-            else                                                                    // 2nd > 3rd
-            {
-                if (playerHand[i+1].1.rawValue > playerHand[i+2].1.rawValue)
-                {
-                    if (playerHand[i+1].1.rawValue > playerHand[i+3].1.rawValue)    // 2nd > 4th
-                    {
-                        handRank.append(playerHand[i+1].1)
-                    }
-                    else                                                            // 4th > 2nd
-                    {
-                        if (playerHand[i+3].1.rawValue > playerHand[i+2].1.rawValue)// 4th > 3rd
-                        {
-                            handRank.append(playerHand[i+3].1)
-                        }
-                        else
-                        {
-                            handRank.append(playerHand[i+2].1)
-                        }
-                    }
-                }
-                else
-                {
-                    if (playerHand[i+2].1.rawValue > playerHand[i+3].1.rawValue)    // 3rd > 4th
-                    {
-                        handRank.append(playerHand[i+2].1)
-                    }
-                    else                                                            // 4th > 3rd
-                    {
-                        handRank.append(playerHand[i+3].1)
-                    }
-                }
-            }
-        }
-         */
-        
          if (debug)
          {
              for h in handRank
@@ -1163,6 +1100,72 @@ extension Dealer
              }
          }
          return handRank
+    }
+    
+    func checkHand(hand: [Card], table: [Card], debug: Bool = false) -> HandRank
+    {
+        var decision : [String: Bool] = [:]
+        
+        func isDone(result: Bool, container: [String: Bool]) -> Bool
+        {
+            if result
+            {
+                if (debug)
+                {
+                    for (k,v) in container
+                    {
+                        if v { print("[check] \(k)") }
+                    }
+                }
+                return true
+            }
+            return false
+        }
+        
+        var result = FullHouse(hand: hand, debug: debug)
+        decision["Full House\t\t(contains three cards of one rank and two cards of another rank)"     ] = (result)
+        if isDone(result:result, container: decision) { return .FullHouse }
+        
+        result = RoyalFlush(hand: hand, debug: debug)
+        decision["Royal Flush\t\t(contains five cards of sequential rank, all of the same suit, from 10 to A)" ] = (result)
+        if isDone(result:result, container: decision) { return .RoyalFlush }
+        
+        result = StraightFlush(hand: hand, debug: debug)
+        decision["Straight Flush\t(contains five cards of sequential rank, all of the same suit, from 2 to 6)" ] = (result)
+        if isDone(result:result, container: decision) { return .StraightFlush }
+        
+        result = Flush(hand: hand, table: table, debug: debug)
+        decision["Flush\t\t\t(contains five cards all of the same suit, not all of sequential rank)"          ] = (result)
+        if isDone(result:result, container: decision) { return .Flush }
+        
+        result = ThreeKind(hand: hand, debug: debug)
+        decision["Three Of A Kind\t(contains three cards of one rank and two cards of two other ranks)"] = (result)
+        if isDone(result:result, container: decision) { return .ThreeKind }
+        
+        result = TwoPair(hand: hand, debug: debug)
+        decision["Two Pair\t\t(contains two cards of one rank, two cards of another rank and one card of a third rank)"       ] = (result)
+        if isDone(result:result, container: decision) { return .TwoPair }
+        
+        result = OnePair(hand: hand, debug: debug)
+        decision["One Pair\t\t(contains two cards of one rank and three cards of three other ranks)"       ] = (result)
+        if isDone(result:result, container: decision) { return .OnePair }
+        
+        result = FourKind(hand: hand, debug: debug)
+        decision["Four Of A Kind\t(contains four cards of one rank and one card of another rank)" ] = (result)
+        if isDone(result:result, container: decision) { return .FourKind }
+        
+        result = Straight(hand: hand, debug: debug)
+        decision["Straight\t\t(contains five cards of sequential rank, not all of the same suit)"       ] = (result)
+        if isDone(result:result, container: decision) { return .Straight }
+        
+        return .UNKNOWN
+    }
+    
+    public func compareHand(lhand: Hand, rhand: Hand, table: [Card]) -> HandRank
+    {
+        let left = checkHand(hand: lhand.getCards(), table: table)
+        let right = checkHand(hand: rhand.getCards(), table: table)
+        return (left.rawValue > right.rawValue) ? left : right
     }
 }
 
