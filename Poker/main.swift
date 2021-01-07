@@ -232,6 +232,11 @@ class Player
         return hand
     }
     
+    public func addMoney(money: Int)
+    {
+        buyInAmount += money
+    }
+    
     public func convertMoney(amount: inout Int) -> [Chips: Int]
     {
         while (amount > 0)
@@ -309,8 +314,13 @@ class Table
         if game == .Texas { print("========== TEXAS HOLD'EM MATCH \(String(describing: format.string(from: Date()))) ==========")}
     }
     
-    public func join(player: Player)
+    public func join(player: Player, money: Int = 0)
     {
+        if (money != 0)
+        {
+            player.addMoney(money: money)
+        }
+        
         if players.count < 8
         {
             if (player.buyIn() >= blind.rawValue)
@@ -387,7 +397,7 @@ class Table
         
         var winner : (Int, HandRank) = (-1,.UNKNOWN)
         
-        for i in 1..<handsList.count
+        for i in 0..<handsList.count
         {
             if (winner.1.rawValue < handsList[i].rawValue)
             {
@@ -399,11 +409,12 @@ class Table
                 // check high card hand accross players
                 let player = dealer.HighCard(players: players, debug: true)
                 
-                for i in 0..<players.count
+                for j in 0..<players.count
                 {
-                    if (players[i].getID() == player.getID())
+                    if (players[j].getID() == player.0.getID())
                     {
-                        winner = (i,handsList[i])
+                        winner = (i % players.count,handsList[i])
+                        break
                     }
                 }
             }
@@ -672,9 +683,10 @@ extension Dealer
     }
 }
 
+// hand evaluation functions
 extension Dealer
 {
-    public func HighCard(players: [Player], debug: Bool=false) -> Player
+    public func HighCard(players: [Player], debug: Bool=false) -> (Player, Bool)
     {
         func forward(first: Card, second: Card) -> Bool
         {
@@ -725,7 +737,7 @@ extension Dealer
             highestRankingHand = cards
         }
         
-        return isHighCard
+        return (isHighCard, true)
     }
     
     private func OnePair(hand: [Card], debug: Bool=false) -> Bool
@@ -742,7 +754,6 @@ extension Dealer
     
     private func TwoPair(hand: [Card], debug: Bool=false) -> Bool
     {
-        //var rankCount : [Int: Int] = [:]
         var pairCount = 0
         
         for c in 0..<3
@@ -766,12 +777,9 @@ extension Dealer
         if hand[3].getRank().rawValue == hand[4].getRank().rawValue
         {
             pairCount += 1
-            //return true
         }
         
         return (pairCount == 2) ? true : false
-        
-        //return (Set(rankCount.values).count == 2) ? true : false
     }
     
     private func ThreeKind(hand: [Card], debug: Bool=false) -> Bool
@@ -789,12 +797,36 @@ extension Dealer
     {
         let sortedHand = hand.sorted(){ranks[$0.getRank().rawValue].rawValue < ranks[$1.getRank().rawValue].rawValue}
         
+        if (debug) {
+            for c in sortedHand
+            {
+                c.print()
+            }
+            print(terminator:"\n")
+            print("count: \(sortedHand.count)")
+        }
+        
         var prev = sortedHand.first
         var areAscRank = false
-        for c in 0..<sortedHand.count
+        for c in 1..<sortedHand.count
         {
-            areAscRank = areAscRank || (ranks[prev?.getRank().rawValue ?? Rank.UNKNOWN.rawValue].rawValue < ranks[sortedHand[c].getRank().rawValue].rawValue)
-            prev = sortedHand[c]
+            if (debug)
+            {
+                print("prev \(prev?.getRank())")
+                print("sorted \(sortedHand[c].getRank())")
+                print("\((ranks[prev?.getRank().rawValue ?? Rank.UNKNOWN.rawValue].rawValue + 1)) == \(ranks[sortedHand[c].getRank().rawValue].rawValue)")
+            }
+            
+            // get the value of the current element in the array and compare it to the value of the next one
+            if ((ranks[prev?.getRank().rawValue ?? Rank.UNKNOWN.rawValue].rawValue + 1) == ranks[sortedHand[c].getRank().rawValue].rawValue)
+            {
+                areAscRank = true
+                prev = sortedHand[c]
+            }
+            else
+            {
+                return false
+            }
         }
     
         return areAscRank
@@ -927,9 +959,9 @@ extension Dealer
         
         var bestHand         : ([Card],HandRank) = ([Card](),HandRank.UNKNOWN)
         
-        var cardCombinations : [[Card]]          = [[Card]()]           // holds all possible hands for each player individually
-        var bestRank         : (Int, HandRank)                          // saves the best rank and points to the position of its hand in cardCombinations
-        var playerHand       : [(Int, HandRank)] = [(Int, HandRank)]()  // holds information about each players best hand
+        var cardCombinations : [[Card]]          = []                   // holds all possible hands for each player individually
+        var bestRank         : (Int, HandRank)   = (0, HandRank.UNKNOWN)// saves the best rank and points to the position of its hand in cardCombinations
+        var playerHand       : [(Int, HandRank)] = []                   // holds information about each players best hand
         
         var i : Int = 0
         
@@ -1033,7 +1065,6 @@ extension Dealer
          iterate through all hands associated with one player and evaluate the best one
          each player has 4 tuples, because of the 4 card combinations
          */
-        var handRank         : [HandRank]        = [HandRank]()
         
         if (debug)
         {
@@ -1044,7 +1075,29 @@ extension Dealer
         }
     
         // highest ranking hand overall
-        for _ in 0..<players.count
+        var handRank : [HandRank] = []
+        
+        var highestHand : HandRank = .UNKNOWN
+        
+        for h in playerHand
+        {
+            if (highestHand.rawValue < h.1.rawValue)
+            {
+                highestHand = h.1
+            }
+            else if (highestHand.rawValue == h.1.rawValue)
+            {
+                let player = HighCard(players: players)
+                if (players[h.0].getID() == player.0.getID())
+                {
+                    highestHand = h.1
+                }
+            }
+            handRank.append(highestHand)
+        }
+        
+        /*
+        for p in 0..<playerHand.count
         {
             let i = 0;
             
@@ -1056,6 +1109,15 @@ extension Dealer
                     {
                         handRank.append(playerHand[i].1)
                     }
+                }
+            }
+            // have the same hand rank
+            else if (players[p].getHand().getCards()[playerHand[i].0].getRank().rawValue == players[p].getHand().getCards()[playerHand[i+1].0].getRank().rawValue)
+            {
+                let player = HighCard(players: players)
+                if (player.0.getID() == players[p].getID())
+                {
+                    handRank.append(playerHand[i].1)
                 }
             }
             else                                                                    // 2nd > 3rd
@@ -1091,15 +1153,16 @@ extension Dealer
                 }
             }
         }
+         */
         
-        if (debug)
-        {
-            for h in handRank
-            {
-                print("rank \(h)")
-            }
-        }
-        return handRank
+         if (debug)
+         {
+             for h in handRank
+             {
+                 print("rank \(h)")
+             }
+         }
+         return handRank
     }
 }
 
@@ -1196,7 +1259,7 @@ let p9 = Player(name: "Eve")
 let p10 = Player(name: "God")
 let d2  = Dealer()
 let t2 = Table(game: .Poker, dealer: d2, blind: TableBlind.big, lhp: p8, rhp: p9)
-t2.join(player: p10)
+t2.join(player: p10, money: TableBlind.big.rawValue)
 t2.whosPlaying()
 t2.startGame()
 t2.displayWinner()
